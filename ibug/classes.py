@@ -1085,19 +1085,37 @@ def _pred_dist(test_idx, leaf_idxs, leaf_mat, y_train, k, min_scale, return_knei
             * 'train_idxs': neighbor indices if `return_kneighbors`==True.
             * 'train_vals': neighbor values if `return_kneighbors`==True.
     """
-    affinity = leaf_mat[leaf_idxs].sum(axis=0)  # shape=(n_train,)
-    train_idxs = np.asarray(affinity.argsort())[0][-k:]  # k neighbors
+    # ------------------------------------------------------------------ #
+    # Вибираємо лише рядки для конкретного зразка (тонкий CSR-view)
+    rows = leaf_mat[leaf_idxs]                 # shape = (n_boost, n_train) sparse CSR
+    # ------------------------------------------------------------------ #
+    # Беремо стовпці, де є >=1 ненульове — саме вони можуть бути сусідами
+    cols = np.unique(rows.indices)            # shape ≈ кількість кандидатів (<< n_train)
+    m = cols.size
+    affinity = np.zeros(m, dtype=np.int32)    # скільки разів кожен train-idx співпав із leaf
+
+    # Рахуємо affinity тільки на цих стовпцях
+    indptr, indices = rows.indptr, rows.indices
+    for r in range(rows.shape[0]):            # прогон по кожному дереву
+        start, end = indptr[r], indptr[r + 1]
+        if start == end:
+            continue
+        # indices[start:end] — train-індекси, що потрапили в той самий leaf
+        affinity[np.searchsorted(cols, indices[start:end])] += 1
+
+    # top-k (O(m)), а не повне сортування O(m log m)
+    top_local = np.argpartition(affinity, -k)[-k:]   # індекси всередині cols
+    train_idxs = cols[top_local]                     # глобальні train-idx
     train_vals = y_train[train_idxs]
+
     scale = max(np.std(train_vals), min_scale)
 
-    # compile result
     result = {'test_idx': test_idx, 'scale': scale}
     if cond_mean_type == 'neighbors':
         result['loc'] = np.mean(train_vals)
     if return_kneighbors:
         result['train_idxs'] = train_idxs
         result['train_vals'] = train_vals
-
     return result
 
 
