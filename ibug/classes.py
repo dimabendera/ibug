@@ -21,6 +21,7 @@ class IBUGWrapper(Estimator):
         by modeling the output distribution using the k-nearest neighbors to a
         given test example in the learned tree-kernel space.
     """
+
     def __init__(self,
                  k=100,
                  cond_mean_type='base',
@@ -264,8 +265,10 @@ class IBUGWrapper(Estimator):
         """
         start = time.time()
 
-        test_leaves = self.model_.apply(X).squeeze()  # shape=(n_test, n_boost)
-        test_leaves[:, 1:] += self.leaf_cum_sum_[:-1]  # shape=(n_test, n_boost)
+        #test_leaves = self.model_.apply(X).squeeze()  # shape=(n_test, n_boost)
+        #test_leaves[:, 1:] += self.leaf_cum_sum_[:-1]  # shape=(n_test, n_boost)
+        test_leaves = _to_2d_leaves(self.model_.apply(X))
+        test_leaves[:, 1:] += self.leaf_cum_sum_[:-1]
 
         # result objects
         if self.cond_mean_type == 'base':
@@ -287,9 +290,9 @@ class IBUGWrapper(Estimator):
             while n_remain > 0:
                 n = min(100, n_remain)
                 res_list = parallel(joblib.delayed(_pred_dist)
-                    (test_idx, test_leaves[test_idx][self.tree_idxs_], self.leaf_mat_,
-                    self.y_train_, self.k_, self.min_scale_, return_kneighbors,
-                    self.cond_mean_type) for test_idx in range(n_done, n_done + n))
+                                    (test_idx, test_leaves[test_idx][self.tree_idxs_], self.leaf_mat_,
+                                     self.y_train_, self.k_, self.min_scale_, return_kneighbors,
+                                     self.cond_mean_type) for test_idx in range(n_done, n_done + n))
 
                 # synchronization barrier
                 for res in res_list:
@@ -397,7 +400,8 @@ class IBUGWrapper(Estimator):
         """
         start = time.time()
 
-        test_leaves = self.model_.apply(X).squeeze()  # shape=(n_test, n_boost)
+        #test_leaves = self.model_.apply(X).squeeze()  # shape=(n_test, n_boost)
+        test_leaves = _to_2d_leaves(self.model_.apply(X))
         test_leaves[:, 1:] += self.leaf_cum_sum_[:-1]  # shape=(n_test, n_boost)
 
         # result object
@@ -414,7 +418,7 @@ class IBUGWrapper(Estimator):
                 n = min(100, n_remain)
                 res_list = parallel(joblib.delayed(_affinity)
                                     (test_idx, test_leaves[test_idx][self.tree_idxs_], self.leaf_mat_,
-                                    self.n_train_) for test_idx in range(n_done, n_done + n))
+                                     self.n_train_) for test_idx in range(n_done, n_done + n))
 
                 # synchronization barrier
                 for res in res_list:
@@ -479,11 +483,14 @@ class IBUGWrapper(Estimator):
             - 1d array of leaf counts of shape=(n_boost,).
             - 1d array of cumulative leaf counts of shape=(n_boost,).
         """
-        leaf_counts = self.model_.get_leaf_counts().squeeze()  # shape=(n_boost,)
+        #leaf_counts = self.model_.get_leaf_counts().squeeze()  # shape=(n_boost,)
+        leaf_counts = self.model_.get_leaf_counts().reshape(-1) # 1-D
+
         leaf_cum_sum = np.cumsum(leaf_counts)  # shape=(n_boost,)
         total_num_leaves = np.sum(leaf_counts)  # scalar
 
-        train_leaves = self.model_.apply(X).squeeze()  # shape=(len(X), n_boost)
+        # train_leaves = self.model_.apply(X).squeeze()  # shape=(len(X), n_boost)
+        train_leaves = _to_2d_leaves(self.model_.apply(X))
         train_leaves[:, 1:] += leaf_cum_sum[:-1]  # shape=(len(X), n_boost)
 
         row = train_leaves.flatten().astype(np.int32)  # shape=(n_boost * len(X),)
@@ -513,7 +520,8 @@ class IBUGWrapper(Estimator):
         start = time.time()
         k_params = [k for k in k_params if k <= self.n_train_]  # remove k larger than n_train
 
-        test_leaves = self.model_.apply(X).squeeze()  # shape=(n_test, n_boost)
+        #test_leaves = self.model_.apply(X).squeeze()  # shape=(n_test, n_boost)
+        test_leaves = _to_2d_leaves(self.model_.apply(X))
         test_leaves[:, 1:] += self.leaf_cum_sum_[:-1]  # shape=(len(X), n_boost)
 
         if self.cond_mean_type == 'base':
@@ -532,8 +540,9 @@ class IBUGWrapper(Estimator):
             while n_remain > 0:
                 n = min(100, n_remain)
                 res_list = parallel(joblib.delayed(_pred_dist_k)
-                    (test_idx, test_leaves[test_idx][self.tree_idxs_], self.leaf_mat_,
-                    self.y_train_, k_params, self.eps, self.cond_mean_type) for test_idx in range(n_done, n_done + n))
+                                    (test_idx, test_leaves[test_idx][self.tree_idxs_], self.leaf_mat_,
+                                     self.y_train_, k_params, self.eps, self.cond_mean_type) for test_idx in
+                                    range(n_done, n_done + n))
 
                 # synchronization barrier
                 for res in res_list:
@@ -684,6 +693,7 @@ class KNNWrapper(Estimator):
         by modeling the output distribution of the k-nearest neighbors to a
         given test example in Euclidean space.
     """
+
     def __init__(self,
                  max_feat=20,
                  k=100,
@@ -810,8 +820,11 @@ class KNNWrapper(Estimator):
             assert len(X) == len(y)
             assert len(X_val) == len(y_val)
             assert X.shape[1] == X_val.shape[1]
-            self.max_feat_, self.k_, self.min_scale_, self.loc_val_, self.scale_val_ = self._tune_k(X_train=X, y_train=y,
-                X_val=X_val, y_val=y_val, scoring=self.scoring)
+            self.max_feat_, self.k_, self.min_scale_, self.loc_val_, self.scale_val_ = self._tune_k(X_train=X,
+                                                                                                    y_train=y,
+                                                                                                    X_val=X_val,
+                                                                                                    y_val=y_val,
+                                                                                                    scoring=self.scoring)
 
             if self.variance_calibration:
                 self.gamma_, self.delta_ = self._tune_calibration(loc=self.loc_val_, scale=self.scale_val_,
@@ -867,7 +880,8 @@ class KNNWrapper(Estimator):
         # standardize data
         X_norm = self.scaler_.transform(X)
 
-        neighbors = self.uncertainty_estimator.kneighbors(X_norm[:, self.fi_], return_distance=False)  # shape=(len(X), self.k_)
+        neighbors = self.uncertainty_estimator.kneighbors(X_norm[:, self.fi_],
+                                                          return_distance=False)  # shape=(len(X), self.k_)
         for i, train_idxs in enumerate(neighbors):  # per test example
             train_vals = self.y_train_[train_idxs]
 
@@ -928,10 +942,12 @@ class KNNWrapper(Estimator):
         X_train_norm = self.scaler_.transform(X_train)
         X_val_norm = self.scaler_.transform(X_val)
 
-        scale = np.zeros((len(X_val), len(max_feat_params), len(k_params))).astype(np.float32)  # shape=(n_val, n_feats, n_k)
+        scale = np.zeros((len(X_val), len(max_feat_params), len(k_params))).astype(
+            np.float32)  # shape=(n_val, n_feats, n_k)
         if self.cond_mean_type == 'base':
             # tiled and transposed to get duplicate predictions n_feats x n_k times, shape=(n_val, n_feats, n_k)
-            loc = np.tile(self.predict(X_val), (len(max_feat_params), len(k_params), 1)).transpose(2, 0, 1).astype(np.float32)
+            loc = np.tile(self.predict(X_val), (len(max_feat_params), len(k_params), 1)).transpose(2, 0, 1).astype(
+                np.float32)
         else:
             loc = np.zeros(scale.shape).astype(np.float32)  # shape=(n_val, n_feats, n_k)
 
@@ -939,7 +955,8 @@ class KNNWrapper(Estimator):
 
             for j, max_feat in enumerate(max_feat_params):  # per max_feat
                 feat_idxs = self.sorted_fi_[:max_feat]
-                affinity = np.linalg.norm(X_val_norm[i, feat_idxs] - X_train_norm[:, feat_idxs], axis=1)  # shape=(len(X_train),)
+                affinity = np.linalg.norm(X_val_norm[i, feat_idxs] - X_train_norm[:, feat_idxs],
+                                          axis=1)  # shape=(len(X_train),)
                 train_idxs = np.argsort(affinity)  # smallest to largest distance
 
                 # evaluate different k
@@ -953,10 +970,10 @@ class KNNWrapper(Estimator):
             if (i + 1) % 100 == 0 and self.verbose > 0:
                 if self.logger:
                     self.logger.info(f'[KNN - tuning] {i + 1:,} / {len(X_val):,}, '
-                                    f'cum. time: {time.time() - start:.3f}s')
+                                     f'cum. time: {time.time() - start:.3f}s')
                 else:
                     print(f'[KNN - tuning] {i + 2:,} / {len(X_val):,}, '
-                        f'cum. time: {time.time() - start:.3f}s')
+                          f'cum. time: {time.time() - start:.3f}s')
 
         # evaluate
         assert scoring in ['nll', 'crps']
@@ -1061,9 +1078,31 @@ class KNNWrapper(Estimator):
         return gamma, delta
 
 
+def _to_2d_leaves(arr):
+    """
+    Перетворює результат model_.apply() у форму (n_samples, n_boost),
+    незалежно від:
+        * n_samples == 1  чи  >1
+        * n_class   == 1  чи  >1
+    Для мультикласу (>1) ця обгортка НЕ знімає класову вісь —
+    IBUGWrapper зараз підтримує тільки регресію/один клас.
+    """
+    # (n_samples, n_boost, 1)  →  (n_samples, n_boost)
+    if arr.ndim == 3 and arr.shape[2] == 1:
+        arr = arr[:, :, 0]
+
+    # (n_boost,)              →  (1, n_boost)
+    if arr.ndim == 1:
+        arr = arr.reshape(1, -1)
+
+    # (n_samples, n_boost)    — лишаємо як є
+    return arr
+
+
+
 # parallelizable methods
 def _pred_dist(test_idx, leaf_idxs, leaf_mat, y_train, k, min_scale, return_kneighbors,
-    cond_mean_type):
+               cond_mean_type):
     """
     Compute affinity, variance, and nearest neighbor for the given test instance.
 
@@ -1085,42 +1124,24 @@ def _pred_dist(test_idx, leaf_idxs, leaf_mat, y_train, k, min_scale, return_knei
             * 'train_idxs': neighbor indices if `return_kneighbors`==True.
             * 'train_vals': neighbor values if `return_kneighbors`==True.
     """
-    # ------------------------------------------------------------------ #
-    # Вибираємо лише рядки для конкретного зразка (тонкий CSR-view)
-    rows = leaf_mat[leaf_idxs]                 # shape = (n_boost, n_train) sparse CSR
-    # ------------------------------------------------------------------ #
-    # Беремо стовпці, де є >=1 ненульове — саме вони можуть бути сусідами
-    cols = np.unique(rows.indices)            # shape ≈ кількість кандидатів (<< n_train)
-    m = cols.size
-    affinity = np.zeros(m, dtype=np.int32)    # скільки разів кожен train-idx співпав із leaf
-
-    # Рахуємо affinity тільки на цих стовпцях
-    indptr, indices = rows.indptr, rows.indices
-    for r in range(rows.shape[0]):            # прогон по кожному дереву
-        start, end = indptr[r], indptr[r + 1]
-        if start == end:
-            continue
-        # indices[start:end] — train-індекси, що потрапили в той самий leaf
-        affinity[np.searchsorted(cols, indices[start:end])] += 1
-
-    # top-k (O(m)), а не повне сортування O(m log m)
-    top_local = np.argpartition(affinity, -k)[-k:]   # індекси всередині cols
-    train_idxs = cols[top_local]                     # глобальні train-idx
+    affinity = leaf_mat[leaf_idxs].sum(axis=0)  # shape=(n_train,)
+    train_idxs = np.asarray(affinity.argsort())[0][-k:]  # k neighbors
     train_vals = y_train[train_idxs]
-
     scale = max(np.std(train_vals), min_scale)
 
+    # compile result
     result = {'test_idx': test_idx, 'scale': scale}
     if cond_mean_type == 'neighbors':
         result['loc'] = np.mean(train_vals)
     if return_kneighbors:
         result['train_idxs'] = train_idxs
         result['train_vals'] = train_vals
+
     return result
 
 
 def _pred_dist_k(test_idx, leaf_idxs, leaf_mat, y_train, k_params, epsilon,
-    cond_mean_type):
+                 cond_mean_type):
     """
     Compute affinity, variance, and nearest neighbor for the given test instance.
 
@@ -1196,7 +1217,7 @@ def eval_uncertainty(y, loc, scale, metric='crps'):
         - Float, average score over all examples.
     """
     assert metric in ['nll', 'crps', 'check', 'interval',
-        'rms_cal', 'ma_cal', 'miscal_area', 'sharpness']
+                      'rms_cal', 'ma_cal', 'miscal_area', 'sharpness']
     assert y.shape == loc.shape == scale.shape
 
     result = ()
@@ -1218,6 +1239,6 @@ def eval_uncertainty(y, loc, scale, metric='crps'):
         score_func = uct.sharpness
     else:
         raise ValueError(f'Unknown scoring metric {metric}')
-    
+
     result = score_func(y_pred=loc, y_std=scale, y_true=y)
     return result
